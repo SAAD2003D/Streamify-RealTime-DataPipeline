@@ -8,3 +8,16 @@
 ## project architecture :
 ![image](https://github.com/user-attachments/assets/82081403-fef7-4d34-9d3f-dce3a3b44a86)
 
+## 📂 **Repository Structure**
+```plaintext
+📂 kafka-producer/       # Kafka event simulation (EventSim setup)
+📂 spark-streaming/      # Spark Streaming scripts for processing Kafka data
+📂 airflow-dags/        # Apache Airflow DAGs for batch processing
+📂 dbt-models/          # dbt models for transforming data in BigQuery
+📂 terraform/           # Terraform scripts for provisioning GCP resources
+📂 docker/              # Docker setup for local deployment
+📂 datasets/            # MillionSongSubset (small sample)
+📂 notebooks/           # Jupyter notebooks for data analysis & validation
+📜 README.md            # Project Overview
+```
+
