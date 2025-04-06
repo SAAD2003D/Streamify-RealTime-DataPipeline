@@ -1,0 +1,388 @@
+# Located at: docker/docker-compose.yml
+version: '3.8'
+
+x-spark-common: &spark-common
+  image: bitnami/spark:latest
+  volumes:
+    # Note: This volume assumes 'jobs' is inside 'docker/'. Adjust if needed.
+    # If spark jobs are elsewhere (e.g., project root/Spark-streaming), use:
+    # - ../Spark-streaming:/opt/bitnami/spark/jobs
+    - ./jobs:/opt/bitnami/spark/jobs 
+  command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+  depends_on:
+    - spark-master
+  environment:
+    SPARK_MODE: Worker
+    SPARK_WORKER_CORES: 2
+    SPARK_WORKER_MEMORY: 1g
+    SPARK_MASTER_URL: spark://spark-master:7077
+  networks: # Ensure spark workers are on the network
+    - datamasterylab
+
+x-airflow-common:
+  &airflow-common
+  # IMPORTANT: Replace with your actual image if building locally or set AIRFLOW_IMAGE_NAME
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.5.1} 
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    # Ensure mysql service name matches below (it does)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqlconnector://airflow_user:airflow_password@mysql/airflow 
+    # Ensure postgres service name matches below (it does)
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    # Ensure redis service name matches below (it does)
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: 'Fb0_tkKr2gLg0fHSs0sZg5_k9yFJQSVp2yFP9XSHGOc=' # Example key, replace with your generated key
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false' # Set to false if you don't need examples
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    # If you have requirements specific to Airflow, add them here or in the Dockerfile build
+    _PIP_ADDITIONAL_REQUIREMENTS: "" 
+    
+  volumes:
+    # Mounts DAGs, logs, plugins from the PROJECT ROOT (one level up from docker/)
+    - ../airflow-dags:/opt/airflow/dags 
+    - ../airflow-logs:/opt/airflow/logs 
+    - ../airflow-plugins:/opt/airflow/plugins 
+  # Ensure Airflow runs with a non-root user if possible (requires image setup/permissions)
+  # user: "${AIRFLOW_UID:-50000}:0" # Commented out unless you manage permissions
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+    mysql: # Added mysql dependency as it's used for the DB
+        condition: service_healthy 
+  networks: # Ensure airflow components are on the network
+    - datamasterylab
+
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ['CMD', 'bash', '-c', "echo 'ruok' | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datamasterylab
+  
+  broker:
+    image: confluentinc/cp-server:7.4.0
+    hostname: broker
+    container_name: broker
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: 36000
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: broker:9092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'false'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+    healthcheck:
+      test: ['CMD', 'bash', '-c', "nc -z localhost 9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datamasterylab
+   
+
+  spark-master:
+    image: bitnami/spark:latest
+    volumes:
+      - ./jobs:/opt/bitnami/spark/jobs
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "9090:8080"
+      - "7077:7077"
+    networks:
+      - datamasterylab
+
+  
+    healthcheck: # Basic check if the master port is open
+        test: ["CMD", "nc", "-z", "localhost", "7077"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+  spark-worker-1:
+    <<: *spark-common
+    container_name: spark-worker-1
+  
+  spark-worker-2:
+    <<: *spark-common
+    container_name: spark-worker-2
+
+  data-producer:
+    image: python:3.9 # Base python image, dependencies installed via command
+    container_name: data-producer
+    volumes:
+      # Mounts the producer code from project_root/kafka-producer
+      - ../kafka-producer:/app 
+      # Mounts the producer's requirements from docker/requirements.txt
+      - ./requirements.txt:/app/requirements.txt 
+    working_dir: /app
+    # Installs dependencies then runs the producer script
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python producer.py" 
+    depends_on:
+      broker: # Wait for broker container to start (doesn't guarantee Kafka readiness)
+          condition: service_healthy # Rely on broker healthcheck
+    # === ADDED NETWORK ===
+    networks: 
+      - datamasterylab 
+    restart: on-failure # Optional: Restart if the script fails
+
+  data-consumer:
+    build:
+      context: ../Spark-streaming
+      dockerfile: Dockerfile
+    container_name: data-consumer
+    # Add this command section to override the Dockerfile CMD for debugging
+    
+    depends_on:
+      - broker
+      - spark-master
+    networks:
+      - datamasterylab
+    ports:
+      - "5000:5000"
+    restart: on-failure # Keep this or set to 'no' during debugging
+
+  postgres: # Airflow Metadata DB (Celery Backend)
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    ports: # Optional: Expose port 5432 if you need external access
+      - "5432:5432" 
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - datamasterylab
+
+  mysql: # Airflow Metadata DB (Core Backend)
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password # Use secrets in production
+      MYSQL_DATABASE: airflow
+      MYSQL_USER: airflow_user
+      MYSQL_PASSWORD: airflow_password # Use secrets in production
+    volumes:
+    - mysql_data:/var/lib/mysql
+    # Removed init.sql mount unless you have specific setup needed
+    # - ./init.sql:/docker-entrypoint-initdb.d/init.sql 
+    ports: # Optional: Expose port 3306 if you need external access
+      - "3306:3306" 
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost", "-u", "airflow_user", "-pairflow_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - datamasterylab
+
+  redis: # Airflow Celery Broker
+    image: redis:latest
+    container_name: redis
+    ports: # Optional: Expose port 6379 if you need external access
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - datamasterylab
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    # If you built a custom image locally using 'docker build -t my-airflow .' in docker/
+    # build: . 
+    command: webserver
+    ports:
+      - "8080:8080" # Airflow Web UI
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s # Increase interval slightly
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on: # Depends on DBs, Redis, and Init task
+      <<: *airflow-common-depends-on 
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    # build: . # Uncomment if building locally
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s # Increase interval slightly
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    # build: . # Uncomment if building locally
+    command: celery worker
+    healthcheck:
+      test: ["CMD-SHELL", 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"']
+      interval: 30s # Increase interval slightly
+      timeout: 10s
+      retries: 5
+    environment:
+      <<: *airflow-common-env
+      # Needed for proper signal handling with celery workers
+      DUMB_INIT_SETSID: "0" 
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # airflow-triggerer: # Uncomment if using Deferrable Operators
+  #   <<: *airflow-common
+  #   container_name: airflow-triggerer
+  #   # build: . # Uncomment if building locally
+  #   command: triggerer
+  #   healthcheck:
+  #     test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #   restart: always
+  #   depends_on:
+  #     <<: *airflow-common-depends-on
+  #     airflow-init:
+  #       condition: service_completed_successfully
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    # build: . # Uncomment if building locally
+    entrypoint: /bin/bash
+    # Runs DB migrations and creates default user
+    command:
+      - -c
+      - |
+        exec /entrypoint airflow db upgrade && \
+        airflow users create \
+          --username "${_AIRFLOW_WWW_USER_USERNAME:-airflow}" \
+          --password "${_AIRFLOW_WWW_USER_PASSWORD:-airflow}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    # user: "${AIRFLOW_UID:-50000}:0" # Commented out unless permissions managed
+    
+  # --- Optional / Debugging ---
+
+  # airflow-cli: # Useful for running ad-hoc airflow commands
+  #   <<: *airflow-common
+  #   container_name: airflow-cli
+  #   profiles:
+  #     - debug # Only runs if 'docker compose --profile debug up' is used
+  #   # build: . # Uncomment if building locally
+  #   environment:
+  #     <<: *airflow-common-env
+  #     CONNECTION_CHECK_MAX_COUNT: "0"
+  #   command:
+  #     - bash
+  #     - -c
+  #     - airflow tasks test <DAG_ID> <TASK_ID> <RUN_ID>
+
+  # flower: # Celery monitoring UI
+  #   <<: *airflow-common
+  #   container_name: flower
+  #   # build: . # Uncomment if building locally
+  #   command: celery flower
+  #   profiles:
+  #     - flower # Only runs if 'docker compose --profile flower up' is used
+  #   ports:
+  #     - 5555:5555
+  #   healthcheck:
+  #     test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #   restart: always
+  #   depends_on:
+  #     <<: *airflow-common-depends-on
+  #     airflow-worker: # Depends on worker being up
+  #       condition: service_healthy
+
+  # phpmyadmin: # phpMyAdmin for MySQL DB inspection
+  #  image: phpmyadmin/phpmyadmin
+  #  container_name: phpmyadmin
+  #  ports:
+  #   - "8082:80" # Changed port to avoid conflict with Airflow UI
+  #  environment:
+  #    PMA_HOST: mysql
+  #    PMA_USER: airflow_user
+  #    PMA_PASSWORD: airflow_password # Use secrets in production
+  #  networks:
+  #   - datamasterylab
+  #  depends_on:
+  #   - mysql
+
+volumes:
+  postgres-db-volume:
+  mysql_data: 
+
+networks:
+  datamasterylab:
+    driver: bridge # Explicitly define bridge network

@@ -1,0 +1,5 @@
+kafka-python-ng
+pandas>=1.0.5
+
+
+# Contents of docker/requirements.txt
