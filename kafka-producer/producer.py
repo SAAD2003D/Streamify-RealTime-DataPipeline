@@ -1,4 +1,4 @@
-# Located at: kafka-producer/producer_simple.py
+
 
 import json
 from kafka import KafkaProducer
