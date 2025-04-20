@@ -1,5 +1,5 @@
 kafka-python-ng
 pandas>=1.0.5
-
+faker
 
 # Contents of docker/requirements.txt

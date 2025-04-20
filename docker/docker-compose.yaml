@@ -14,7 +14,7 @@ x-spark-common: &spark-common
   environment:
     SPARK_MODE: Worker
     SPARK_WORKER_CORES: 2
-    SPARK_WORKER_MEMORY: 1g
+    SPARK_WORKER_MEMORY: 4g
     SPARK_MASTER_URL: spark://spark-master:7077
   networks: # Ensure spark workers are on the network
     - datamasterylab
@@ -174,7 +174,11 @@ services:
       - datamasterylab
     ports:
       - "5000:5000"
-    restart: on-failure # Keep this or set to 'no' during debugging
+    restart: on-failure
+    volumes: 
+      - ./secrets/gcs-keyfile.json:/etc/gcp-keys/gcs-keyfile.json:ro 
+
+     # Keep this or set to 'no' during debugging
 
   postgres: # Airflow Metadata DB (Celery Backend)
     image: postgres:13
@@ -380,6 +384,7 @@ services:
   #   - mysql
 
 volumes:
+  spark-output-volume:
   postgres-db-volume:
   mysql_data: 
 

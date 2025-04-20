@@ -16,16 +16,6 @@ ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
 WORKDIR /app
 
-# --- New COPY Strategy ---
-# 1. Copy the necessary sub-directory from the level above the context
-#    into a temporary location WITHIN the build context (e.g., /app/tmp_docker_stuff)
-
-
-# 2. Now copy the specific JAR from that temporary location
-
-
-# 3. (Optional but recommended) Clean up the temporary directory
-
 # Copy consumer requirements
 COPY ./requirements.txt /app/requirements.txt
 # Install Python dependencies
@@ -34,11 +24,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copy the rest of the application code
 COPY . /app
 
-# In ../Spark-streaming/Dockerfile
+
 CMD [ \
     "spark-submit", \
     "--master", "spark://spark-master:7077", \
-    # List main packages needed
     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0", \
     "consumer.py" \
 ]

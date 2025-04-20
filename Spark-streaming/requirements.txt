@@ -1,9 +1,10 @@
 confluent-kafka==2.4.0
 py4j==0.10.9.7
-
+pyarrow>=10.0.0
 pyspark>=3.4.0 
 simplejson==3.19.2
 geohash2
 flask
 flask-cors
 pandas>=1.0.5
+google-cloud-storage>=2.0.0
