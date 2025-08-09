@@ -1,0 +1,20 @@
+# models/staging/sources.yml
+version: 2
+
+sources:
+  - name: streamify_bq_source # A name for this source group
+    description: "Raw and aggregated data loaded into BigQuery from Spark/Airflow."
+    database: manifest-glyph-456012-i8 # Your GCP project ID
+    schema: streamify_dataset         # Your BigQuery dataset WHERE SPARK WRITES
+    tables:
+      - name: song_count
+        description: "Aggregated total play counts per song."
+        # Optionally define loaded_at_field for freshness tests
+        # loaded_at_field: _PARTITIONTIME # If your BQ table is partition_time ingested
+      - name: event_counts # This is your event_type, song_id aggregation
+        description: "Aggregated counts per event type and song."
+      - name: location_counts # This is your location, song_id aggregation
+        description: "Aggregated counts per location and song."
+      - name: raw_user_events # CRITICAL for user behavior models
+        description: "Raw user interaction events from the streaming pipeline. Must include user_id, event_type, timestamp."
+        
