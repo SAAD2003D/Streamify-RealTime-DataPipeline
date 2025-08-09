@@ -14,6 +14,19 @@
 ## project architecture :
 ![image](https://github.com/user-attachments/assets/82081403-fef7-4d34-9d3f-dce3a3b44a86)
 
+## 🚀 **Tech Stack**
+- **Event Streaming**: Apache Kafka
+- **Stream Processing**: Apache Spark
+- **Batch Processing & Orchestration**: Apache Airflow
+- **Data Transformation**: dbt
+- **Data Storage**: Google Cloud Storage (GCS)
+- **Data Warehouse**: BigQuery
+- **Infrastructure as Code**: Terraform
+- **Containerization**: Docker
+- **Visualization**: Google Data Studio
+
+---
+
 ## 📂 **Repository Structure**
 ```plaintext
 📂 kafka-producer/       # Kafka event simulation (EventSim setup)
@@ -26,4 +39,35 @@
 📂 notebooks/           # Jupyter notebooks for data analysis & validation
 📜 README.md            # Project Overview
 ```
+
+---
+
+## 🔥 **Project Workflow**
+1. **Kafka Producer** generates fake user events using **EventSim**.
+2. **Spark Streaming** processes events and stores them in **Google Cloud Storage (GCS)** every 2 minutes.
+3. **Apache Airflow** runs hourly batch jobs to move data to **BigQuery**.
+4. **dbt** transforms the raw data into structured tables for analytics.
+5. **Google Data Studio** visualizes metrics like:
+   - 🎵 Most played songs
+   - 👥 Active users
+   - 🌍 User demographics
+   - 🕒 Session durations
+
+---
+
+## ⚙️ **Setup & Deployment**
+1. Clone the repository:  
+   ```sh
+   git clone https://github.com/YOUR_GITHUB_USERNAME/Streamify-RealTime-DataPipeline.git
+   cd Streamify-RealTime-DataPipeline
+   ```
+2. Install dependencies (Docker, Terraform, etc.).
+3. Run Kafka producer and Spark Streaming.
+4. Deploy Airflow DAGs.
+5. Connect BigQuery to Google Data Studio.
+
+---
+
+## 💡 **Contributing**
+Feel free to fork the repo, open issues, or submit PRs.
 
